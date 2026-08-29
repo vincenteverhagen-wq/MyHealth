@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ 'Account aanmaken' if mode == 'register' else 'Inloggen' }} · MyHealth</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='auth.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='auth-fixes.css') }}">
+</head>
+<body class="auth-page">
+  <main class="auth-shell">
+    <section class="auth-brand"><h1>MyHealth</h1></section>
+    <section class="panel auth-card">
+      <span class="eyebrow">{{ 'NIEUW ACCOUNT' if mode == 'register' else 'WELKOM TERUG' }}</span>
+      <h2>{{ 'Account aanmaken' if mode == 'register' else 'Inloggen' }}</h2>
+      <p>{{ 'Kies zelf een gebruikersnaam en wachtwoord.' if mode == 'register' else 'Log in om verder te gaan naar je persoonlijke omgeving.' }}</p>
+      {% if error %}<div class="auth-error">{{ error }}</div>{% endif %}
+      <form method="post">
+        <label>Gebruikersnaam<input name="username" autocomplete="username" autofocus required></label>
+        <label>Wachtwoord<input name="password" type="password" autocomplete="{{ 'new-password' if mode == 'register' else 'current-password' }}" required></label>
+        <button class="save" type="submit">{{ 'Account aanmaken' if mode == 'register' else 'Inloggen' }}</button>
+      </form>
+      {% if mode == 'register' %}<p class="auth-switch">Heb je al een account? <a href="/login">Inloggen</a></p>{% else %}<p class="auth-switch">Nog geen account? <a href="/register">Account aanmaken</a></p>{% endif %}
+    </section>
+  </main>
+</body>
+</html>

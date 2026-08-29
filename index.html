@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MyHealth · Voeding en fitness</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='extras.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='keyboard.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='myhealth.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='auth-fixes.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='catalog.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='catalog-overrides.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='fitness.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='overview.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='exercise-categories.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='navigation.css') }}">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="logo">M</span><div><strong>MyHealth</strong><small>Voeding &amp; fitness</small></div></div>
+    <div class="header-right"><nav><button class="nav active" data-view="overview">Overzicht</button><button class="nav" data-view="builder">Maaltijd maken</button><button class="nav" data-view="health">MyHealth</button><button class="nav fitness-nav" data-view="fitness">MyFitness</button><div class="more-menu"><button type="button" class="more-toggle" id="more-menu-toggle">Meer <span>⌄</span></button><div class="more-dropdown" id="more-dropdown"><button class="nav more-nav" data-view="meals"><span>Mijn maaltijden</span><small>Opgeslagen samenstellingen</small></button><button class="nav more-nav" data-view="products"><span>Producten</span><small>Productcatalogus beheren</small></button><button class="nav more-nav fitness-nav" data-view="exercises"><span>Oefeningen</span><small>Oefeningenbibliotheek</small></button><button class="nav more-nav friends-nav" data-view="friends"><span>Vrienden</span><small>Andere gebruikers bekijken</small></button></div></div></nav><div class="account-menu"><div class="account-identity"><span class="account-avatar" id="current-user-avatar">U</span><div><small>Ingelogd als</small><strong id="current-user"></strong></div></div><form method="post" action="/logout"><button type="submit" title="Uitloggen"><span>Uitloggen</span><b aria-hidden="true">↗</b></button></form></div></div>
+  </header>
+
+  <main>
+    <section id="overview" class="view active overview-view"><div class="section-title split-title"><div><span class="overview-eyebrow">OVERZICHT</span><h1 id="overview-heading">Mijn overzicht</h1><p id="overview-subtitle">Voeding, fitness en energiebalans op één plek.</p></div><div class="overview-date-actions"><button class="overview-back" id="overview-back" hidden>← Mijn overzicht</button><button class="overview-back" id="export-overview">Exporteren</button><label>Van<input id="overview-from" type="date"></label><label>Tot en met<input id="overview-to" type="date"></label></div></div><div class="overview-range" id="overview-range"></div><div class="overview-stats"><article class="overview-stat food-stat"><small>Gegeten</small><strong id="overview-eaten">0</strong><span>kcal</span></article><article class="overview-stat burn-stat"><small>Verbrand</small><strong id="overview-burned">0</strong><span>kcal</span></article><article class="overview-stat balance-stat"><small>Verbrand − gegeten</small><strong id="overview-balance">0</strong><span>kcal</span></article></div><div class="overview-columns"><article class="panel overview-panel"><div class="overview-panel-head"><div><span class="overview-dot food-dot"></span><h2>Voeding</h2></div><strong id="overview-food-total"></strong></div><div id="overview-food" class="overview-detail-list"></div></article><article class="panel overview-panel"><div class="overview-panel-head"><div><span class="overview-dot fitness-dot"></span><h2>Fitness</h2></div><strong id="overview-fitness-total"></strong></div><div id="overview-fitness" class="overview-detail-list"></div></article><article class="panel overview-panel burn-panel"><div class="overview-panel-head"><div><span class="overview-dot burn-dot"></span><h2>Verbranding</h2></div><strong id="overview-burn-total"></strong></div><div id="overview-burn-days" class="overview-detail-list burn-day-list"></div></article></div></section>
+    <section id="builder" class="view">
+      <aside class="panel calculator" id="calculator" tabindex="0" aria-label="Rekenmachine. Klik hier om het toetsenbord te gebruiken.">
+        <div class="calculator-head"><div><span class="eyebrow">REKENHULP</span><h2>Rekenmachine</h2></div><button id="calc-clear" title="Wissen">C</button></div>
+        <div class="calc-expression" id="calc-expression">&nbsp;</div>
+        <output id="calc-display">0</output>
+        <div class="calc-keys">
+          <button data-calc="7">7</button><button data-calc="8">8</button><button data-calc="9">9</button><button class="operator" data-calc="/">÷</button>
+          <button data-calc="4">4</button><button data-calc="5">5</button><button data-calc="6">6</button><button class="operator" data-calc="*">×</button>
+          <button data-calc="1">1</button><button data-calc="2">2</button><button data-calc="3">3</button><button class="operator" data-calc="-">−</button>
+          <button data-calc="0">0</button><button data-calc=".">,</button><button class="equals" id="calc-equals">=</button><button class="operator" data-calc="+">+</button>
+        </div>
+        <button class="use-grams" id="use-as-grams">Gebruik uitkomst als gram</button>
+        <p>Klik hier en gebruik je toetsenbord. Enter is =.</p>
+      </aside>
+      <div class="intro"><div><span class="eyebrow">NIEUWE MAALTIJD</span><h1>Wat zit er op je bord?</h1><p>Stel je maaltijd samen en bekijk direct alle voedingswaarden.</p></div><div class="meal-name"><label for="meal-name">Naam maaltijd</label><input id="meal-name" placeholder="Bijv. Kip met rijst"></div></div>
+      <div class="workspace">
+        <article class="panel ingredients">
+          <div class="panel-head"><div><h2>Ingrediënten</h2><p id="item-count">0 producten toegevoegd</p></div><div class="head-actions"><button class="secondary" id="quick-product">Nieuw product</button><button class="secondary" id="add-saved-meal">+ Maaltijd toevoegen</button><button class="add" id="add-row">+ Product toevoegen</button></div></div>
+          <div id="meal-rows" class="meal-rows"></div>
+          <div id="empty-builder" class="empty"><span>＋</span><h3>Begin met een product</h3><p>Voeg een ingrediënt toe en vul het gewicht in.</p></div>
+        </article>
+        <aside class="panel summary">
+          <div class="panel-head"><div><h2>Totaal</h2><p>voor deze maaltijd</p></div><span class="live">● LIVE</span></div>
+          <div class="calories"><span id="total-energie">0</span><small>kcal</small></div>
+          <div id="macro-list"></div>
+          <button class="save" id="save-meal">Maaltijd opslaan</button>
+          <p class="save-hint">Wordt lokaal op deze computer bewaard</p>
+        </aside>
+      </div>
+    </section>
+
+    <section id="health" class="view">
+      <div class="section-title split-title"><div><span class="eyebrow">VOEDINGSDAGBOEK</span><h1>MyHealth</h1><p>Leg per dag vast wat je hebt gegeten.</p></div><div class="health-top-actions"><button class="secondary" id="export-health">Exporteren</button><button class="add" id="add-health-day">+ Dag toevoegen</button></div></div>
+      <div id="health-editor" hidden>
+        <div class="health-date-row panel"><label for="health-date">Datum<input id="health-date" type="date"></label><span>Je kunt de datum typen of via het kalendericoon kiezen.</span></div>
+        <div class="health-workspace"><div id="health-categories" class="health-categories"></div><aside class="panel summary health-summary"><div class="panel-head"><div><h2>Dagtotaal</h2><p id="health-summary-date">vandaag</p></div><span class="live">● LIVE</span></div><div class="calories"><span id="health-total-energie">0</span><small>kcal</small></div><div id="health-macro-list"></div><button class="save" id="save-health-day">Dag opslaan</button></aside></div>
+      </div>
+      <div class="health-history-head"><h2>Opgeslagen dagen</h2><p>Bekijk wat je per dag hebt gegeten.</p></div><div id="health-day-list" class="health-day-list"></div>
+    </section>
+    <section id="meals" class="view"><div class="section-title"><span class="eyebrow">OVERZICHT</span><h1>Mijn maaltijden</h1><p>Je eerder opgeslagen samenstellingen.</p></div><div id="meal-list" class="cards"></div></section>
+    <section id="products" class="view"><div class="section-title split-title"><div><span class="eyebrow">DATABASE</span><h1>Producten</h1><p>Alle waarden zijn per 100 gram.</p></div><button class="add" id="new-meal-from-products">+ Nieuwe maaltijd maken</button></div><div class="product-layout"><form id="product-form" class="panel product-form"><h2>Nieuw product</h2><label>Naam<input name="name" required placeholder="Productnaam"></label><label>Categorie<input name="category" list="category-options" required placeholder="Kies of typ een categorie"></label><div id="nutrient-fields" class="fields"></div><button class="save" type="submit">Product opslaan</button></form><div class="panel product-table-wrap"><table><thead><tr><th>Product</th><th>Categorie</th><th>kcal</th><th>Eiwit</th><th>KH</th><th>Vet</th><th></th></tr></thead><tbody id="product-table"></tbody></table></div></div></section>
+    <section id="fitness" class="view fitness-view"><div class="section-title split-title"><div><span class="fitness-eyebrow">TRAININGSDAGBOEK</span><h1>MyFitness</h1><p>Leg per dag je oefeningen, sets, herhalingen en gewichten vast.</p></div><div class="fitness-top-actions"><button class="fitness-secondary" id="export-fitness">Exporteren</button><button class="fitness-primary" id="pick-exercise">+ Oefening toevoegen</button></div></div><div class="fitness-date panel"><label for="fitness-date">Trainingsdatum<input id="fitness-date" type="date"></label><span>Standaard staat deze op vandaag.</span></div><div id="fitness-editor" class="panel fitness-editor" hidden><div class="fitness-editor-head"><div><span class="fitness-eyebrow">GESELECTEERDE OEFENING</span><h2 id="fitness-editor-name"></h2></div><button class="fitness-close" id="cancel-fitness-editor">×</button></div><div class="fitness-set-head"><span>Set</span><span>Herhalingen</span><span>Gewicht (kg)</span><span></span></div><div id="fitness-set-list"></div><div class="fitness-set-actions"><button class="fitness-secondary" id="add-warmup-set">+ Warming-upset</button><button class="fitness-secondary" id="add-work-set">+ Werkset</button></div><button class="fitness-primary fitness-save" id="save-fitness-exercise">Oefening opslaan</button></div><div class="fitness-day-head"><div><h2 id="fitness-day-title">Training van vandaag</h2><p>Alle opgeslagen oefeningen van deze dag.</p></div><strong id="fitness-day-volume"></strong></div><div id="fitness-day-exercises" class="fitness-day-exercises"></div></section>
+    <section id="exercises" class="view fitness-view"><div class="section-title"><span class="fitness-eyebrow">OEFENINGENBIBLIOTHEEK</span><h1>Oefeningen</h1><p>Beheer de oefeningen die je in MyFitness kunt selecteren.</p></div><div class="exercise-management"><form id="exercise-form" class="panel exercise-form"><h2>Nieuwe oefening</h2><label>Naam oefening<input name="name" required placeholder="Bijv. Romanian deadlift"></label><label>Categorie<input name="category" list="exercise-category-options" required placeholder="Kies of typ een categorie"></label><button class="fitness-primary" type="submit">Oefening opslaan</button></form><div class="panel exercise-list-panel"><div class="exercise-list-head"><h2>Mijn oefeningen</h2><span id="exercise-count"></span></div><div id="exercise-list" class="exercise-list"></div></div></div></section>
+    <section id="friends" class="view friends-view"><div class="section-title"><span class="friends-eyebrow">COMMUNITY</span><h1>Vrienden</h1><p>Bekijk de dagoverzichten van andere gebruikers.</p></div><div id="friends-list" class="friends-list"></div></section>
+  </main>
+  <dialog id="product-dialog">
+    <form id="quick-product-form">
+      <div class="dialog-head"><div><span class="eyebrow">NIEUW INGREDIËNT</span><h2>Product toevoegen</h2><p>Vul de voedingswaarden per 100 gram in.</p></div><button type="button" class="dialog-close" id="close-product-dialog">×</button></div>
+      <label>Naam<input name="name" required placeholder="Productnaam"></label>
+      <label>Categorie<input name="category" list="category-options" required placeholder="Kies of typ een categorie"></label>
+      <div id="quick-nutrient-fields" class="fields"></div>
+      <div class="dialog-actions"><button type="button" class="secondary" id="cancel-product-dialog">Annuleren</button><button class="save" type="submit">Opslaan en toevoegen</button></div>
+    </form>
+  </dialog>
+  <dialog id="meal-dialog">
+    <div class="meal-dialog-content">
+      <div class="dialog-head"><div><span class="eyebrow">OPGESLAGEN MAALTIJDEN</span><h2>Maaltijd toevoegen</h2><p>Kies een maaltijd om alle ingrediënten over te nemen.</p></div><button type="button" class="dialog-close" id="close-meal-dialog">×</button></div>
+      <div id="saved-meal-picker" class="saved-meal-picker"></div>
+    </div>
+  </dialog>
+  <dialog id="health-meal-dialog"><div class="meal-dialog-content"><div class="dialog-head"><div><span class="eyebrow">OPGESLAGEN MAALTIJDEN</span><h2>Maaltijd toevoegen</h2><p>Kies een maaltijd voor dit eetmoment.</p></div><button type="button" class="dialog-close" id="close-health-meal-dialog">×</button></div><div id="health-meal-picker" class="saved-meal-picker"></div></div></dialog>
+  <dialog id="overview-export-dialog"><form id="overview-export-form"><div class="dialog-head"><div><span class="overview-eyebrow">OVERZICHT PDF</span><h2>Overzicht exporteren</h2><p>Kies de eerste en laatste dag voor de export.</p></div><button type="button" class="dialog-close" id="close-overview-export">×</button></div><div class="export-dates"><label>Van<input name="from" type="date" required></label><label>Tot en met<input name="to" type="date" required></label></div><div class="dialog-actions"><button type="button" class="secondary" id="cancel-overview-export">Annuleren</button><button class="save" type="submit">PDF downloaden</button></div></form></dialog>
+  <dialog id="export-dialog"><form id="export-form"><div class="dialog-head"><div><span class="eyebrow">PDF EXPORT</span><h2>Periode exporteren</h2><p>Kies de eerste en laatste dag van het overzicht.</p></div><button type="button" class="dialog-close" id="close-export-dialog">×</button></div><div class="export-dates"><label>Van<input name="from" type="date" required></label><label>Tot en met<input name="to" type="date" required></label></div><div class="dialog-actions"><button type="button" class="secondary" id="cancel-export">Annuleren</button><button class="save" type="submit">PDF downloaden</button></div></form></dialog>
+  <dialog id="catalog-dialog" class="catalog-dialog"><div class="catalog-shell"><div class="catalog-head"><div><span class="eyebrow">PRODUCTCATALOGUS</span><h2>Kies een product</h2><p>Zoek op naam of blader door de categorieën.</p></div><button type="button" class="dialog-close" id="close-catalog-dialog">×</button></div><div class="catalog-tools"><div class="catalog-search"><span>⌕</span><input id="catalog-search" type="search" placeholder="Zoek een product…" autocomplete="off"></div><button class="secondary" id="catalog-new-product" type="button">+ Nieuw product</button></div><div id="catalog-categories" class="catalog-categories"></div><div id="catalog-products" class="catalog-products"></div></div></dialog>
+  <dialog id="exercise-picker-dialog" class="exercise-picker-dialog"><div class="exercise-picker-shell"><div class="fitness-dialog-head"><div><span class="fitness-eyebrow">OEFENINGEN</span><h2>Kies een oefening</h2><p>Selecteer een oefening voor je training.</p></div><button type="button" class="fitness-close" id="close-exercise-picker">×</button></div><div class="exercise-picker-tools"><input id="exercise-search" type="search" placeholder="Zoek een oefening…"><button class="fitness-secondary" id="new-exercise-from-picker" type="button">+ Nieuwe oefening</button></div><div id="exercise-picker-categories" class="exercise-picker-categories"></div><div id="exercise-picker-list" class="exercise-picker-list"></div></div></dialog>
+  <dialog id="fitness-export-dialog"><form id="fitness-export-form"><div class="dialog-head"><div><span class="fitness-eyebrow">MYFITNESS PDF</span><h2>Trainingen exporteren</h2><p>Kies de eerste en laatste dag van het overzicht.</p></div><button type="button" class="fitness-close" id="close-fitness-export">×</button></div><div class="export-dates"><label>Van<input name="from" type="date" required></label><label>Tot en met<input name="to" type="date" required></label></div><div class="dialog-actions"><button type="button" class="fitness-secondary" id="cancel-fitness-export">Annuleren</button><button class="fitness-primary" type="submit">PDF downloaden</button></div></form></dialog>
+  <datalist id="category-options"></datalist>
+  <datalist id="exercise-category-options"></datalist>
+  <div id="toast" role="status"></div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
