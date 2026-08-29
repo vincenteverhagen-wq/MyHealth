@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import csv
+import json
 import os
+import shutil
 import sqlite3
 from datetime import date, datetime, timedelta
 from io import BytesIO
@@ -21,7 +24,9 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE = DATA_DIR / "voeding.db"
 AUTH_DATABASE = DATA_DIR / "auth.db"
-USER_DATA_DIR = DATA_DIR / "user_data"
+USER_DATA_DIR = DATA_DIR / "user_data"  # oude opslag, alleen nog voor automatische migratie
+PERSONS_DIR = DATA_DIR / "personen"
+SEED_PRODUCTS_CSV = BASE_DIR / "producten.csv"
 
 NUTRIENTS = (
     "energie", "vet", "verzadigd_vet", "koolhydraten",
@@ -94,12 +99,33 @@ def current_user_id():
     return 1
 
 
-def user_database(user_id=None):
-    user_id = int(user_id or current_user_id())
+def legacy_user_database(user_id):
+    """Databasepad uit v17 en ouder, alleen gebruikt om bestaande voortgang te migreren."""
+    user_id = int(user_id)
     if user_id == 1:
         return DATABASE
-    USER_DATA_DIR.mkdir(exist_ok=True)
     return USER_DATA_DIR / f"user_{user_id}.db"
+
+
+def person_directory(user_id=None):
+    user_id = int(user_id or current_user_id())
+    folder = PERSONS_DIR / f"persoon_{user_id}"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def user_database(user_id=None):
+    """Iedere persoon heeft vanaf v18 een eigen map met een zelfstandige database."""
+    user_id = int(user_id or current_user_id())
+    target = person_directory(user_id) / "myhealth.db"
+    legacy = legacy_user_database(user_id)
+    if not target.exists() and legacy.exists() and legacy.resolve() != target.resolve():
+        shutil.copy2(legacy, target)
+    return target
+
+
+def person_products_csv(user_id=None):
+    return person_directory(user_id) / "producten.csv"
 
 
 def db(user_id=None):
@@ -109,9 +135,134 @@ def db(user_id=None):
     return connection
 
 
+CSV_HEADERS = ("naam", "categorie", *NUTRIENTS)
+CSV_HEADER_ALIASES = {
+    "naam": "name", "name": "name", "product": "name", "productnaam": "name",
+    "categorie": "category", "category": "category",
+    "energie": "energie", "kcal": "energie", "calorieen": "energie", "calorieën": "energie",
+    "vet": "vet", "verzadigdvet": "verzadigd_vet", "verzadigd_vet": "verzadigd_vet",
+    "koolhydraten": "koolhydraten", "kh": "koolhydraten", "suikers": "suikers",
+    "vezels": "vezels", "eiwit": "eiwit", "proteine": "eiwit", "proteïne": "eiwit", "zout": "zout",
+}
+
+
+def normalize_csv_header(value):
+    return str(value or "").strip().lower().replace(" ", "").replace("-", "").replace("/", "")
+
+
+def parse_csv_number(value):
+    text = str(value or "").strip().replace(" ", "")
+    if not text:
+        return 0.0
+    if "," in text and "." in text:
+        # Ondersteun zowel 1.234,5 als 1,234.5.
+        if text.rfind(",") > text.rfind("."):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    else:
+        text = text.replace(",", ".")
+    return max(0.0, float(text))
+
+
+def read_products_csv_bytes(raw):
+    text = raw.decode("utf-8-sig")
+    if not text.strip():
+        raise ValueError("Het CSV-bestand is leeg.")
+    try:
+        dialect = csv.Sniffer().sniff(text[:4096], delimiters=";,\t")
+        delimiter = dialect.delimiter
+    except csv.Error:
+        delimiter = ";" if ";" in text.splitlines()[0] else ","
+    reader = csv.DictReader(text.splitlines(), delimiter=delimiter)
+    if not reader.fieldnames:
+        raise ValueError("Het CSV-bestand heeft geen kolomnamen.")
+    mapped = {}
+    for field in reader.fieldnames:
+        normalized = normalize_csv_header(field)
+        target = CSV_HEADER_ALIASES.get(normalized)
+        if target:
+            mapped[field] = target
+    if "name" not in mapped.values():
+        raise ValueError("De CSV moet minimaal een kolom 'naam' of 'name' bevatten.")
+    products = []
+    for line_number, row in enumerate(reader, start=2):
+        normalized_row = {target: row.get(source, "") for source, target in mapped.items()}
+        name = str(normalized_row.get("name", "")).strip()
+        if not name:
+            continue
+        category = str(normalized_row.get("category", "Overig")).strip() or "Overig"
+        try:
+            nutrients = [parse_csv_number(normalized_row.get(key, 0)) for key in NUTRIENTS]
+        except ValueError as exc:
+            raise ValueError(f"Ongeldig getal op regel {line_number}.") from exc
+        products.append((name, category, *nutrients))
+    if not products:
+        raise ValueError("Er staan geen geldige producten in de CSV.")
+    return products
+
+
+def seed_products():
+    if SEED_PRODUCTS_CSV.exists():
+        try:
+            return read_products_csv_bytes(SEED_PRODUCTS_CSV.read_bytes())
+        except (OSError, UnicodeError, ValueError):
+            pass
+    return [
+        (name, START_PRODUCT_CATEGORIES.get(name, "Overig"), *values)
+        for name, values in START_PRODUCTS.items()
+    ]
+
+
+def csv_number(value):
+    number = float(value)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.6f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def sync_products_csv(user_id=None):
+    user_id = int(user_id or current_user_id())
+    path = person_products_csv(user_id)
+    with db(user_id) as connection:
+        rows = connection.execute(
+            f"SELECT name, category, {', '.join(NUTRIENTS)} FROM products ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+    temporary = path.with_suffix(".csv.tmp")
+    with temporary.open("w", encoding="utf-8-sig", newline="") as handle:
+        writer = csv.writer(handle, delimiter=";")
+        writer.writerow(CSV_HEADERS)
+        for row in rows:
+            writer.writerow([row["name"], row["category"], *[csv_number(row[key]) for key in NUTRIENTS]])
+    temporary.replace(path)
+    return path
+
+
+def sync_person_profile(user_id=None):
+    user_id = int(user_id or current_user_id())
+    with auth_db() as connection:
+        user = connection.execute("SELECT id, username, created_at FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user:
+        return
+    profile = {"id": user["id"], "username": user["username"], "created_at": user["created_at"]}
+    (person_directory(user_id) / "persoon.json").write_text(
+        json.dumps(profile, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def init_user_db(user_id=1):
     with db(user_id) as connection:
         connection.executescript("""
+            CREATE TABLE IF NOT EXISTS product_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS exercise_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
             CREATE TABLE IF NOT EXISTS products (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -181,6 +332,25 @@ def init_user_db(user_id=1):
                 burned_kcal REAL NOT NULL DEFAULT 0 CHECK (burned_kcal >= 0),
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS workout_templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE TABLE IF NOT EXISTS workout_template_exercises (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id INTEGER NOT NULL REFERENCES workout_templates(id) ON DELETE CASCADE,
+                exercise_id INTEGER NOT NULL REFERENCES exercises(id),
+                position INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS workout_template_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_exercise_id INTEGER NOT NULL REFERENCES workout_template_exercises(id) ON DELETE CASCADE,
+                set_type TEXT NOT NULL CHECK (set_type IN ('warmingup','work')),
+                set_order INTEGER NOT NULL,
+                reps INTEGER NOT NULL CHECK (reps > 0),
+                weight REAL NOT NULL CHECK (weight >= 0)
+            );
         """)
         product_columns = {row["name"] for row in connection.execute("PRAGMA table_info(products)").fetchall()}
         if "category" not in product_columns:
@@ -190,11 +360,19 @@ def init_user_db(user_id=1):
                 "UPDATE products SET category = ? WHERE name = ? COLLATE NOCASE AND (category IS NULL OR category = '' OR category = 'Overig')",
                 (category, product_name),
             )
-        for name, values in START_PRODUCTS.items():
+        for name, category, *values in seed_products():
             connection.execute(
                 f"INSERT OR IGNORE INTO products (name, category, {', '.join(NUTRIENTS)}) VALUES (?, ?, {', '.join('?' for _ in NUTRIENTS)})",
-                (name, START_PRODUCT_CATEGORIES.get(name, "Overig"), *values),
+                (name, category, *values),
             )
+        # Productcategorieën en oefeningcategorieën zijn bewust twee volledig losse lijsten.
+        # Bestaande categorieën worden bij een upgrade automatisch in de juiste lijst opgenomen.
+        connection.execute("INSERT OR IGNORE INTO product_categories (name) VALUES ('Overig')")
+        for category in sorted(set(START_PRODUCT_CATEGORIES.values())):
+            connection.execute("INSERT OR IGNORE INTO product_categories (name) VALUES (?)", (category,))
+        for row in connection.execute("SELECT DISTINCT category FROM products WHERE category IS NOT NULL AND TRIM(category) <> ''").fetchall():
+            connection.execute("INSERT OR IGNORE INTO product_categories (name) VALUES (?)", (row["category"],))
+
         exercise_columns = {row["name"] for row in connection.execute("PRAGMA table_info(exercises)").fetchall()}
         if "category" not in exercise_columns:
             connection.execute("ALTER TABLE exercises ADD COLUMN category TEXT NOT NULL DEFAULT 'Overig'")
@@ -208,7 +386,14 @@ def init_user_db(user_id=1):
                 "INSERT OR IGNORE INTO exercises (name, category) VALUES (?, ?)",
                 (exercise_name, START_EXERCISE_CATEGORIES.get(exercise_name, "Overig")),
             )
+        connection.execute("INSERT OR IGNORE INTO exercise_categories (name) VALUES ('Overig')")
+        for category in EXERCISE_CATEGORIES:
+            connection.execute("INSERT OR IGNORE INTO exercise_categories (name) VALUES (?)", (category,))
+        for row in connection.execute("SELECT DISTINCT category FROM exercises WHERE category IS NOT NULL AND TRIM(category) <> ''").fetchall():
+            connection.execute("INSERT OR IGNORE INTO exercise_categories (name) VALUES (?)", (row["category"],))
     INITIALIZED_USER_DATABASES.add(int(user_id))
+    sync_person_profile(user_id)
+    sync_products_csv(user_id)
 
 
 def init_db():
@@ -356,11 +541,183 @@ def index():
     return render_template("index.html")
 
 
+def category_rows(table_name):
+    with db() as connection:
+        rows = connection.execute(
+            f"SELECT id, name FROM {table_name} ORDER BY CASE WHEN name = 'Overig' THEN 0 ELSE 1 END, name COLLATE NOCASE"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def create_category(table_name, name):
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("Vul een categorienaam in.")
+    with db() as connection:
+        try:
+            category_id = connection.execute(
+                f"INSERT INTO {table_name} (name) VALUES (?)", (clean_name,)
+            ).lastrowid
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Deze categorie bestaat al.") from exc
+        row = connection.execute(f"SELECT id, name FROM {table_name} WHERE id = ?", (category_id,)).fetchone()
+    return dict(row)
+
+
+def rename_category(table_name, item_table, category_id, new_name):
+    clean_name = str(new_name or "").strip()
+    if not clean_name:
+        raise ValueError("Vul een categorienaam in.")
+    with db() as connection:
+        current = connection.execute(f"SELECT id, name FROM {table_name} WHERE id = ?", (category_id,)).fetchone()
+        if not current:
+            return None
+        if current["name"].casefold() == "overig" and clean_name.casefold() != "overig":
+            raise ValueError("De categorie Overig kan niet worden hernoemd.")
+        try:
+            connection.execute(f"UPDATE {table_name} SET name = ? WHERE id = ?", (clean_name, category_id))
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("Deze categorie bestaat al.") from exc
+        connection.execute(
+            f"UPDATE {item_table} SET category = ? WHERE category = ? COLLATE NOCASE",
+            (clean_name, current["name"]),
+        )
+        row = connection.execute(f"SELECT id, name FROM {table_name} WHERE id = ?", (category_id,)).fetchone()
+    return dict(row)
+
+
+def remove_category(table_name, item_table, category_id):
+    with db() as connection:
+        current = connection.execute(f"SELECT id, name FROM {table_name} WHERE id = ?", (category_id,)).fetchone()
+        if not current:
+            return None
+        if current["name"].casefold() == "overig":
+            raise ValueError("De categorie Overig kan niet worden verwijderd.")
+        connection.execute(f"INSERT OR IGNORE INTO {table_name} (name) VALUES ('Overig')")
+        affected = connection.execute(
+            f"UPDATE {item_table} SET category = 'Overig' WHERE category = ? COLLATE NOCASE",
+            (current["name"],),
+        ).rowcount
+        connection.execute(f"DELETE FROM {table_name} WHERE id = ?", (category_id,))
+    return {"name": current["name"], "reassigned": affected}
+
+
+@app.get("/api/product-categories")
+def get_product_categories():
+    return jsonify(category_rows("product_categories"))
+
+
+@app.post("/api/product-categories")
+def add_product_category():
+    try:
+        category = create_category("product_categories", request.get_json(force=True).get("name"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409 if "bestaat al" in str(exc) else 400
+    return jsonify(category), 201
+
+
+@app.patch("/api/product-categories/<int:category_id>")
+def update_product_category(category_id):
+    try:
+        category = rename_category("product_categories", "products", category_id, request.get_json(force=True).get("name"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409 if "bestaat al" in str(exc) else 400
+    if not category:
+        return jsonify(error="Productcategorie niet gevonden."), 404
+    sync_products_csv(g.user_id)
+    return jsonify(category)
+
+
+@app.delete("/api/product-categories/<int:category_id>")
+def delete_product_category(category_id):
+    try:
+        result = remove_category("product_categories", "products", category_id)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    if not result:
+        return jsonify(error="Productcategorie niet gevonden."), 404
+    sync_products_csv(g.user_id)
+    return jsonify(result)
+
+
+@app.get("/api/exercise-categories")
+def get_exercise_categories():
+    return jsonify(category_rows("exercise_categories"))
+
+
+@app.post("/api/exercise-categories")
+def add_exercise_category():
+    try:
+        category = create_category("exercise_categories", request.get_json(force=True).get("name"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409 if "bestaat al" in str(exc) else 400
+    return jsonify(category), 201
+
+
+@app.patch("/api/exercise-categories/<int:category_id>")
+def update_exercise_category(category_id):
+    try:
+        category = rename_category("exercise_categories", "exercises", category_id, request.get_json(force=True).get("name"))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 409 if "bestaat al" in str(exc) else 400
+    if not category:
+        return jsonify(error="Oefeningcategorie niet gevonden."), 404
+    return jsonify(category)
+
+
+@app.delete("/api/exercise-categories/<int:category_id>")
+def delete_exercise_category(category_id):
+    try:
+        result = remove_category("exercise_categories", "exercises", category_id)
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    if not result:
+        return jsonify(error="Oefeningcategorie niet gevonden."), 404
+    return jsonify(result)
+
+
 @app.get("/api/products")
 def products():
     with db() as connection:
         rows = connection.execute("SELECT * FROM products ORDER BY name COLLATE NOCASE").fetchall()
     return jsonify([product_dict(row) for row in rows])
+
+
+@app.get("/api/products.csv")
+def download_products_csv():
+    path = sync_products_csv(g.user_id)
+    return send_file(path, mimetype="text/csv; charset=utf-8", as_attachment=True, download_name="producten.csv")
+
+
+@app.post("/api/products/import")
+def import_products_csv():
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify(error="Kies eerst een CSV-bestand."), 400
+    if not upload.filename.lower().endswith(".csv"):
+        return jsonify(error="Upload een bestand met de extensie .csv."), 400
+    raw = upload.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        return jsonify(error="Het CSV-bestand is te groot (maximaal 2 MB)."), 400
+    try:
+        imported = read_products_csv_bytes(raw)
+    except (UnicodeError, ValueError) as exc:
+        return jsonify(error=str(exc)), 400
+    added = 0
+    skipped = 0
+    with db() as connection:
+        for name, category, *values in imported:
+            connection.execute("INSERT OR IGNORE INTO product_categories (name) VALUES (?)", (category,))
+            cursor = connection.execute(
+                f"INSERT OR IGNORE INTO products (name, category, {', '.join(NUTRIENTS)}) VALUES (?, ?, {', '.join('?' for _ in NUTRIENTS)})",
+                (name, category, *values),
+            )
+            if cursor.rowcount:
+                added += 1
+            else:
+                skipped += 1
+    sync_products_csv(g.user_id)
+    return jsonify(added=added, skipped=skipped, total=len(imported))
 
 
 @app.post("/api/products")
@@ -376,6 +733,7 @@ def add_product():
         return jsonify(error="Gebruik alleen geldige, positieve getallen."), 400
     try:
         with db() as connection:
+            connection.execute("INSERT OR IGNORE INTO product_categories (name) VALUES (?)", (category,))
             cursor = connection.execute(
                 f"INSERT INTO products (name, category, {', '.join(NUTRIENTS)}) VALUES (?, ?, {', '.join('?' for _ in NUTRIENTS)})",
                 (name, category, *values),
@@ -384,6 +742,7 @@ def add_product():
             row = connection.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
     except sqlite3.IntegrityError:
         return jsonify(error="Dit product bestaat al."), 409
+    sync_products_csv(g.user_id)
     return jsonify(product_dict(row)), 201
 
 
@@ -396,6 +755,7 @@ def delete_product(product_id):
         return jsonify(error="Dit product wordt gebruikt in een opgeslagen maaltijd."), 409
     if not result.rowcount:
         return jsonify(error="Product niet gevonden."), 404
+    sync_products_csv(g.user_id)
     return "", 204
 
 
@@ -474,6 +834,7 @@ def add_exercise():
         return jsonify(error="Vul een categorie voor de oefening in."), 400
     try:
         with db() as connection:
+            connection.execute("INSERT OR IGNORE INTO exercise_categories (name) VALUES (?)", (category,))
             exercise_id = connection.execute("INSERT INTO exercises (name, category) VALUES (?, ?)", (name, category)).lastrowid
             row = connection.execute("SELECT id, name, category FROM exercises WHERE id = ?", (exercise_id,)).fetchone()
     except sqlite3.IntegrityError:
@@ -487,9 +848,129 @@ def delete_exercise(exercise_id):
         with db() as connection:
             result = connection.execute("DELETE FROM exercises WHERE id = ?", (exercise_id,))
     except sqlite3.IntegrityError:
-        return jsonify(error="Deze oefening wordt gebruikt in een opgeslagen training."), 409
+        return jsonify(error="Deze oefening wordt gebruikt in een opgeslagen training of in Mijn oefeningen."), 409
     if not result.rowcount:
         return jsonify(error="Oefening niet gevonden."), 404
+    return "", 204
+
+
+def clean_workout_template_exercises(items):
+    if not isinstance(items, list) or not items:
+        raise ValueError("Voeg minimaal één oefening toe.")
+    clean = []
+    seen = set()
+    for position, item in enumerate(items):
+        try:
+            exercise_id = int(item["exercise_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Controleer de gekozen oefeningen.") from exc
+        if exercise_id in seen:
+            raise ValueError("Een oefening kan maar één keer in hetzelfde schema staan.")
+        seen.add(exercise_id)
+        counters = {"warmingup": 0, "work": 0}
+        sets = []
+        for set_item in item.get("sets", []):
+            try:
+                set_type = str(set_item["set_type"])
+                reps = int(set_item["reps"])
+                weight = float(set_item["weight"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError("Controleer de sets, herhalingen en gewichten.") from exc
+            if set_type not in counters or reps <= 0 or weight < 0:
+                raise ValueError("Controleer de sets, herhalingen en gewichten.")
+            counters[set_type] += 1
+            sets.append((set_type, counters[set_type], reps, weight))
+        if not sets or not counters["work"]:
+            raise ValueError("Iedere oefening moet minimaal één werkset hebben.")
+        clean.append((exercise_id, position, sets))
+    return clean
+
+
+def workout_templates_data(connection):
+    result = []
+    templates = connection.execute(
+        "SELECT id, name, created_at FROM workout_templates ORDER BY id DESC"
+    ).fetchall()
+    for template in templates:
+        exercises = []
+        rows = connection.execute(
+            """
+            SELECT wte.id, wte.exercise_id, wte.position, e.name, e.category
+            FROM workout_template_exercises wte
+            JOIN exercises e ON e.id = wte.exercise_id
+            WHERE wte.template_id = ?
+            ORDER BY wte.position, wte.id
+            """,
+            (template["id"],),
+        ).fetchall()
+        for exercise in rows:
+            sets = connection.execute(
+                """
+                SELECT id, set_type, set_order, reps, weight
+                FROM workout_template_sets
+                WHERE template_exercise_id = ?
+                ORDER BY CASE set_type WHEN 'warmingup' THEN 0 ELSE 1 END, set_order, id
+                """,
+                (exercise["id"],),
+            ).fetchall()
+            exercises.append({
+                "id": exercise["id"],
+                "exercise_id": exercise["exercise_id"],
+                "name": exercise["name"],
+                "category": exercise["category"],
+                "sets": [dict(item) for item in sets],
+            })
+        result.append({
+            "id": template["id"], "name": template["name"],
+            "created_at": template["created_at"], "exercises": exercises,
+        })
+    return result
+
+
+@app.get("/api/workout-templates")
+def get_workout_templates():
+    with db() as connection:
+        return jsonify(workout_templates_data(connection))
+
+
+@app.post("/api/workout-templates")
+def add_workout_template():
+    data = request.get_json(force=True)
+    name = str(data.get("name", "")).strip()
+    if not name:
+        return jsonify(error="Geef het schema een naam, bijvoorbeeld Chestday."), 400
+    try:
+        exercises = clean_workout_template_exercises(data.get("exercises", []))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    try:
+        with db() as connection:
+            valid_ids = {row[0] for row in connection.execute("SELECT id FROM exercises").fetchall()}
+            if any(exercise_id not in valid_ids for exercise_id, _, _ in exercises):
+                return jsonify(error="Een gekozen oefening bestaat niet meer."), 400
+            template_id = connection.execute(
+                "INSERT INTO workout_templates (name) VALUES (?)", (name,)
+            ).lastrowid
+            for exercise_id, position, sets in exercises:
+                template_exercise_id = connection.execute(
+                    "INSERT INTO workout_template_exercises (template_id, exercise_id, position) VALUES (?, ?, ?)",
+                    (template_id, exercise_id, position),
+                ).lastrowid
+                connection.executemany(
+                    "INSERT INTO workout_template_sets (template_exercise_id, set_type, set_order, reps, weight) VALUES (?, ?, ?, ?, ?)",
+                    [(template_exercise_id, *set_item) for set_item in sets],
+                )
+    except sqlite3.IntegrityError:
+        return jsonify(error="Er bestaat al een schema met deze naam."), 409
+    return jsonify(id=template_id, name=name), 201
+
+
+@app.delete("/api/workout-templates/<int:template_id>")
+def delete_workout_template(template_id):
+    with db() as connection:
+        result = connection.execute("DELETE FROM workout_templates WHERE id = ?", (template_id,))
+    if not result.rowcount:
+        return jsonify(error="Schema niet gevonden."), 404
     return "", 204
 
 
@@ -727,6 +1208,59 @@ def save_fitness_exercise(day_date):
     except sqlite3.IntegrityError:
         return jsonify(error="De oefening kon niet worden opgeslagen."), 400
     return jsonify(id=workout_exercise_id), 201
+
+
+@app.post("/api/fitness-days/<day_date>/templates/<int:template_id>")
+def load_workout_template_into_day(day_date, template_id):
+    day_date = valid_date(day_date)
+    if not day_date:
+        return jsonify(error="Kies een geldige datum."), 400
+    with db() as connection:
+        template = connection.execute("SELECT id, name FROM workout_templates WHERE id = ?", (template_id,)).fetchone()
+        if not template:
+            return jsonify(error="Schema niet gevonden."), 404
+        template_exercises = connection.execute(
+            """
+            SELECT id, exercise_id, position
+            FROM workout_template_exercises
+            WHERE template_id = ?
+            ORDER BY position, id
+            """,
+            (template_id,),
+        ).fetchall()
+        if not template_exercises:
+            return jsonify(error="Dit schema bevat geen oefeningen."), 400
+        day = connection.execute("SELECT id FROM fitness_days WHERE day_date = ?", (day_date,)).fetchone()
+        if day:
+            day_id = day["id"]
+            connection.execute("UPDATE fitness_days SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (day_id,))
+        else:
+            day_id = connection.execute("INSERT INTO fitness_days (day_date) VALUES (?)", (day_date,)).lastrowid
+        position = connection.execute(
+            "SELECT COUNT(*) FROM workout_exercises WHERE fitness_day_id = ?", (day_id,)
+        ).fetchone()[0]
+        added = 0
+        for item in template_exercises:
+            workout_exercise_id = connection.execute(
+                "INSERT INTO workout_exercises (fitness_day_id, exercise_id, position) VALUES (?, ?, ?)",
+                (day_id, item["exercise_id"], position),
+            ).lastrowid
+            sets = connection.execute(
+                """
+                SELECT set_type, set_order, reps, weight
+                FROM workout_template_sets
+                WHERE template_exercise_id = ?
+                ORDER BY CASE set_type WHEN 'warmingup' THEN 0 ELSE 1 END, set_order, id
+                """,
+                (item["id"],),
+            ).fetchall()
+            connection.executemany(
+                "INSERT INTO workout_sets (workout_exercise_id, set_type, set_order, reps, weight) VALUES (?, ?, ?, ?, ?)",
+                [(workout_exercise_id, row["set_type"], row["set_order"], row["reps"], row["weight"]) for row in sets],
+            )
+            position += 1
+            added += 1
+    return jsonify(template=template["name"], added=added), 201
 
 
 @app.delete("/api/workout-exercises/<int:workout_exercise_id>")
