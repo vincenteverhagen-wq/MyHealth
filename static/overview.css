@@ -15,5 +15,5 @@
 .burn-day small{color:#756d8f}
 .burn-day button{border:0;background:#6b55c5;color:#fff;border-radius:8px;padding:9px 10px;font-size:10px;font-weight:900;cursor:pointer}
 .burn-day input:disabled{background:#efedf5;color:#716c7b}
-@media(max-width:1050px){.overview-columns{grid-template-columns:1fr 1fr}.burn-panel{grid-column:1/-1}}
-@media(max-width:850px){.overview-columns{grid-template-columns:1fr}.burn-panel{grid-column:auto}}
+@media(max-width:1050px){.overview-columns{grid-template-columns:1fr 1fr}.fitness-panel{grid-column:1/-1}}
+@media(max-width:850px){.overview-columns{grid-template-columns:1fr}.fitness-panel{grid-column:auto}}
