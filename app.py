@@ -20,7 +20,8 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR))
+DEFAULT_DATA_DIR = Path("/var/data") if os.environ.get("RENDER") else BASE_DIR
+DATA_DIR = Path(os.environ.get("DATA_DIR", DEFAULT_DATA_DIR))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE = DATA_DIR / "voeding.db"
 AUTH_DATABASE = DATA_DIR / "auth.db"

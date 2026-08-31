@@ -7,3 +7,9 @@ services:
     envVars:
       - key: SECRET_KEY
         generateValue: true
+      - key: DATA_DIR
+        value: /var/data
+    disk:
+      name: myhealth-data
+      mountPath: /var/data
+      sizeGB: 1

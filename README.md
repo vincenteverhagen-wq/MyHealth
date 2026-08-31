@@ -40,7 +40,9 @@ Bewaar bij een lokale update vooral de map `personen/` en `auth.db`. De map `per
 
 ### Render
 
-Op Render is de lokale schijf zonder permanente opslag tijdelijk. Als `personen/` en `auth.db` ook na een redeploy moeten blijven bestaan, laat `DATA_DIR` naar permanente opslag wijzen, bijvoorbeeld `/var/data`.
+`render.yaml` maakt een permanente disk van 1 GB aan op `/var/data` en stelt `DATA_DIR=/var/data` in. Daardoor worden `auth.db` en alle mappen onder `personen/` buiten iedere nieuwe deployment bewaard. De applicatie gebruikt op Render bovendien standaard `/var/data`, ook wanneer `DATA_DIR` niet apart is ingevuld.
+
+Een Persistent Disk is bij Render een betaalde functie. Wanneer deze website al als losse Web Service bestaat en niet als Blueprint vanuit `render.yaml` wordt beheerd, voeg dan één keer in het Render-dashboard een disk toe met mount path `/var/data` en zet de environment variable `DATA_DIR` op `/var/data`. Daarna blijven accounts en voortgang bij volgende deploys bestaan.
 
 Gunicorn staat in `requirements.txt`. Gebruik:
 
@@ -70,3 +72,5 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python app.py
 ```
+## v20
+- Categorievelden bij Producten en Oefeningen zijn nu echte dropdowns: je kunt alleen bestaande categorieën selecteren en niet meer vrij typen.
